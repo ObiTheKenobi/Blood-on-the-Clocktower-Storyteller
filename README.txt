@@ -1,0 +1,2 @@
+The DB SCHEMA.sql contains the SQL code to set up the database, prepopulated with dummy data. The data from assignments, games and players can be removed,
+    but all other tables must remain populated as they contain the necessary IDs for scripts and characters

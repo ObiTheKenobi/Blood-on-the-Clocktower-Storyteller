@@ -1,0 +1,7 @@
+*.pyc
+*.db
+*.sqbpro
+Calcs.txt
+calculator.py
+features/calculator.feature
+features/steps/calculator_steps.py
