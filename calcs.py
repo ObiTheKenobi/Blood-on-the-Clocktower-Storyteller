@@ -8,6 +8,7 @@ import sqlite3
 import math
 import random
 import os
+from WebConnection import webSetUp
 
 def assignments(script_name, player_list):
 
@@ -320,6 +321,9 @@ def assignments(script_name, player_list):
 
     # Output the final assignment results
     assignment_df = pd.DataFrame(assignments)
+
+    webSetUp(assignment_df, script_name)
+
     print("\nFinal Assignments:")
     print(assignment_df)
 
