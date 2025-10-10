@@ -1,13 +1,6 @@
 ## MAIN PROGRAM ##
 
-import numpy as np
-import pandas as pd
-import pymc as pm
-import arviz as az
-from pulp import LpProblem, LpVariable, LpMinimize, lpSum, LpBinary
 import sqlite3
-from didyoumean3.didyoumean import did_you_mean
-import os
 import db_setup
 
 from calcs import assignments

@@ -2,12 +2,10 @@
 import numpy as np
 import pandas as pd
 import pymc as pm
-import arviz as az
 from pulp import LpProblem, LpVariable, LpMinimize, lpSum, LpBinary
 import sqlite3
 import math
 import random
-import os
 from WebConnection import webSetUp
 import db_setup
 
@@ -300,6 +298,62 @@ def assignments(script_name, player_list):
         av_evil = evil_total / num_evil
 
 
+########################## CHARACTER CONSTRAINTS ##########################
+## ATHEIST & LEGION BEING IGNORED DUE TO BEING EXPERIMENTAL ##
+# Balloonist   
+    # +0/+1 outsiders, -0/-1 townsfolk
+        # Randomly choose which
+
+# Bounty hunter
+    # 1 townsfolk is actually evil
+        # Need to treat townsfolk as evil in order to balance
+
+# Choirboy
+    # If there is a choirboy in play, then the King must be in play
+
+# Huntsman
+    # If there is a huntsman in play, then the Damsel must be in play
+
+# Village idiot
+    # There are 0-3 village idiots in play
+        # If there are 2 =< village idiots, one is drunk
+
+# Hermit
+    # -0/-1 outsiders, +0/+1 townsfolk
+        # Randomly choose which
+
+# Baron
+    # +2 outsiders, -2 townsfolk
+
+# Godfather
+    # -1/+1 outsiders, +1/-1 townsfolk
+
+# Summoner
+    # -1 demons, +1 townsfolk
+
+# Xaan
+    # x outsiders 
+        # x being any number from 1-4 (probably)
+
+# Fang Gu
+    # +1 outsider, -1 townsfolk
+
+# Kazali
+    # ????????????????????
+
+# Lil' monsta
+    # -1 demon, +1 minion 
+        # Randomly assign one of the minions to be babysitting the lil' monsta  
+
+# Lord of Typhon
+    # ?????????????????????????????????????????
+
+# Vigormorits 
+    # -1 outsider, +1 townsfolk
+
+
+
+###########################################################################
 
         ## OBJECTIVE: minimise the imbalance between teams and maximise bias satisfaction
         bias_score = lpSum(x[i][j] * B[i][j] for i in range(num_players) for j in range(num_characters))
