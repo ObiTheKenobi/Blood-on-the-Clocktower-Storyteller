@@ -7,13 +7,12 @@ import arviz as az
 from pulp import LpProblem, LpVariable, LpMinimize, lpSum, LpBinary
 import sqlite3
 from didyoumean3.didyoumean import did_you_mean
-
-
+import os
+import db_setup
 
 from calcs import assignments
 from post_game_data_collection import dataCollection
 from new_script import addScript
-
 
 
 de = ["Liza", "Madi", "Ed", "Rowan", "Rita", "Aden", "Grace", "Aman", "Will"]
@@ -34,7 +33,7 @@ def setup():
                 script += words[i].lower()
 
         try:
-            con = sqlite3.connect('clocktower.db') 
+            con = sqlite3.connect(db_setup.db_path) 
             cur = con.cursor() 
         except Exception as e:
             print(f'An error occurred: {e}.')
@@ -76,7 +75,7 @@ def setup():
                 print("Player already in game")
             else:
                 try:
-                    con = sqlite3.connect('clocktower.db') 
+                    con = sqlite3.connect(db_setup.db_path)  
                     cur = con.cursor() 
                 except Exception as e:
                     print(f'An error occurred: {e}.')
@@ -109,7 +108,7 @@ def addPlayer(player=None):
     if player == None:
         player = str(input("Enter player name:   ")).capitalize()
     try:
-        con = sqlite3.connect('clocktower.db') 
+        con = sqlite3.connect(db_setup.db_path) 
         cur = con.cursor() 
     except Exception as e:
         print(f'An error occurred: {e}.')

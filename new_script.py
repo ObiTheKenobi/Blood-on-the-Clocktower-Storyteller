@@ -1,7 +1,7 @@
 ### NEW SCRIPT ###
 
 import sqlite3
-
+import db_setup
 ## Replace characters that are already in the script with another one
 def editChars(char_list, char_names, char):
     print("Characters:")
@@ -72,7 +72,7 @@ def forceChars(force_char_list, force_char_names, force_char, force_limit, orig_
 ## Ensures any scripts added contain the necessary limits for number of characters in certain roles
 def scriptRequirements(script_id, script_type):
     try:
-        con = sqlite3.connect('clocktower.db') 
+        con = sqlite3.connect(db_setup.db_path) 
         cur = con.cursor() 
     except Exception as e:
         print(f'An error occurred: {e}.')
@@ -279,7 +279,7 @@ def addScript(script_name=None):
             script_name = str(input("Enter the name of the custom script:   "))
             
         try:
-            con = sqlite3.connect('clocktower.db') 
+            con = sqlite3.connect(db_setup.db_path) 
             cur = con.cursor() 
         except Exception as e:
             print(f'An error occurred: {e}.')

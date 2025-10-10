@@ -1,7 +1,7 @@
 ## POST GAME DATA COLLECTION ##
 import sqlite3
 from rapidfuzz import process
-
+import db_setup
 
 
 ## Tries to autocorrect incorrectly entered character names
@@ -13,7 +13,7 @@ def correct_spelling(input_str, valid_entries, threshold=10):
 ## Compute the new strength of a character depending on how it performed throughout the game
 def compute_adjusted_strength(character_id, decay_factor=0.3):
     try:
-        con = sqlite3.connect('clocktower.db') 
+        con = sqlite3.connect(db_setup.db_path) 
         cur = con.cursor() 
     except Exception as e:
         print(f'An error occurred: {e}.')
@@ -69,7 +69,7 @@ def eloUpdate(game_id):
     k = 24  # Elo update factor
 
     try:
-        con = sqlite3.connect('clocktower.db')
+        con = sqlite3.connect(db_setup.db_path)
         cur = con.cursor()
 
         # Fetch all assignments for this game
@@ -130,7 +130,7 @@ def dataCollection():
     num_alive_players = int(input("Enter number of alive players:   "))
 
     try:
-        con = sqlite3.connect('clocktower.db') 
+        con = sqlite3.connect(db_setup.db_path) 
         cur = con.cursor() 
     except Exception as e:
         print(f'An error occurred: {e}.')
@@ -213,7 +213,7 @@ def dataCollection():
             players.append(player)
 
         try:
-            con = sqlite3.connect('clocktower.db') 
+            con = sqlite3.connect(db_setup.db_path) 
             cur = con.cursor() 
         except Exception as e:
             print(f'An error occurred: {e}.')

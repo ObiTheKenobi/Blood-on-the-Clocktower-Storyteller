@@ -9,13 +9,12 @@ import math
 import random
 import os
 from WebConnection import webSetUp
+import db_setup
 
 def assignments(script_name, player_list):
-
     # Connect to db
     try:
-        db_path = os.path.join(os.path.dirname(__file__), 'clocktower.db')
-        con = sqlite3.connect(db_path)
+        con = sqlite3.connect(db_setup.db_path)
         cur = con.cursor() 
     except Exception as e:
         print(f'An error occurred: {e}.')
@@ -60,9 +59,11 @@ def assignments(script_name, player_list):
         """
         cur.execute(query, (player,))
         rows = cur.fetchall()
-        a, b = zip(*rows)
-        team_for_player = list(b)
-
+        try:
+            a, b = zip(*rows)
+            team_for_player = list(b)
+        except:
+            team_for_player = ['Good', 'Good', 'Good', 'Good', 'Good', 'Good', 'Good', 'Good', 'Good', 'Good']
         recent_history[player] = team_for_player
 
 
@@ -158,174 +159,185 @@ def assignments(script_name, player_list):
 
     game_data['normalized_strength'] = game_data['character_id'].map(getNormalisedStrength)
 
+    accept = False
+    while not accept:
+        ## Building Bayesian logicistic model
+        with pm.Model() as model:
+            weighted_elo = pm.Normal('weighted_elo', mu=1, sigma=3)
+            weighted_strength = pm.Normal('weighted_strength', mu=1, sigma=3)
+            intercept = pm.Normal('intercept', mu=0, sigma=1)
 
-    ## Building Bayesian logicistic model
-    with pm.Model() as model:
-        weighted_elo = pm.Normal('weighted_elo', mu=1, sigma=3)
-        weighted_strength = pm.Normal('weighted_strength', mu=1, sigma=3)
-        intercept = pm.Normal('intercept', mu=0, sigma=1)
+            theta = pm.Data('theta', game_data['normalized_elo'].values)
+            phi = pm.Data('phi', game_data['normalized_strength'].values)
 
-        theta = pm.Data('theta', game_data['normalized_elo'].values)
-        phi = pm.Data('phi', game_data['normalized_strength'].values)
+            logits = (weighted_elo * theta) + (weighted_strength * phi) + intercept
+            p = pm.Deterministic('p', pm.math.sigmoid(logits))
 
-        logits = (weighted_elo * theta) + (weighted_strength * phi) + intercept
-        p = pm.Deterministic('p', pm.math.sigmoid(logits))
+            outcome = pm.Bernoulli('outcome', p=p, observed=game_data['won'].values)
+            map_estimate = pm.find_MAP()
 
-        outcome = pm.Bernoulli('outcome', p=p, observed=game_data['won'].values)
-        map_estimate = pm.find_MAP()
-
-    weighted_elo = map_estimate['weighted_elo']
-    weighted_strength = map_estimate['weighted_strength']
-    intercept = map_estimate['intercept']
+        weighted_elo = map_estimate['weighted_elo']
+        weighted_strength = map_estimate['weighted_strength']
+        intercept = map_estimate['intercept']
 
 
 
-   ### Generate win probability matrix S[i][j] ###
-    ## Sigmoid function
-    def sigmoid(x, steepness=1.5, midpoint=3):
-        return 1 / (1 + np.exp(steepness * (x - midpoint)))
+       ### Generate win probability matrix S[i][j] ###
+        ## Sigmoid function
+        def sigmoid(x, steepness=1.5, midpoint=3):
+            return 1 / (1 + np.exp(steepness * (x - midpoint)))
 
-    ## If a player has been good more often, add bias towards being evil and vice versa
-    def get_alignment_bias(player_id, target_alignment):
-        history = recent_history.get(player_id, [])
-        bias = 0
+        ## If a player has been good more often, add bias towards being evil and vice versa
+        def get_alignment_bias(player_id, target_alignment):
+            history = recent_history.get(player_id, [])
+            bias = 0
 
-        if target_alignment == 'Good':
-            recent_evil = history[:2].count('Evil')
-            consecutive_evil = 0
-            for align in history:
-                if align == 'Evil':
-                    consecutive_evil += 1
+            if target_alignment == 'Good':
+                recent_evil = history[:2].count('Evil')
+                consecutive_evil = 0
+                for align in history:
+                    if align == 'Evil':
+                        consecutive_evil += 1
+                    else:
+                        break
+
+                base = 0.5 + 0.3 * recent_evil + 0.2 * consecutive_evil
+                noise = random.uniform(-1.5, 1.5)
+                bias = base + noise
+
+            elif target_alignment == 'Evil':
+                good_streak = 0
+                for align in history:
+                    if align == 'Good':
+                        good_streak += 1
+                    else:
+                        break
+
+                # Logistic decay
+                decay = 1 / (1 + math.exp(1.2 * (good_streak - 3)))
+                noise = random.uniform(0.3, 1.0)
+                base = 0.3 + decay * noise
+
+                # Add in a random element to ensure that the assignments are not predictable
+                bias = base + random.uniform(0.05, 0.2)
+
+            return round(bias, 3)
+
+
+        num_players = len(players)
+        num_characters = len(characters)
+        S = np.zeros((num_players, num_characters))
+        B = np.zeros((num_players, num_characters))
+
+        for i, player in players.iterrows():
+            for j, character in characters.iterrows():
+                if character['alignment'] == 'Good':
+                    elo = player['elo_good']
                 else:
-                    break
+                    elo = player['elo_evil']
 
-            base = 0.5 + 0.3 * recent_evil + 0.2 * consecutive_evil
-            noise = random.uniform(-1.5, 1.5)
-            bias = base + noise
+                norm_elo = normaliseElo(elo)
+                norm_strength = normaliseBaseStrength(character['base_strength'])
 
-        elif target_alignment == 'Evil':
-            good_streak = 0
-            for align in history:
-                if align == 'Good':
-                    good_streak += 1
-                else:
-                    break
+                logit = weighted_elo * norm_elo + weighted_strength * norm_strength + intercept
+                win_prob = 1 / (1 + np.exp(-logit))
+                S[i][j] = win_prob
 
-            # Logistic decay
-            decay = 1 / (1 + math.exp(1.2 * (good_streak - 3)))
-            noise = random.uniform(0.3, 1.0)
-            base = 0.3 + decay * noise
-
-            # Add in a random element to ensure that the assignments are not predictable
-            bias = base + random.uniform(0.05, 0.2)
-
-        return round(bias, 3)
+                bias = get_alignment_bias(player['player_id'], character['alignment'])
+                B[i][j] = bias
 
 
-    num_players = len(players)
-    num_characters = len(characters)
-    S = np.zeros((num_players, num_characters))
-    B = np.zeros((num_players, num_characters))
+        ## Creating an LP problem to assign characters to players to ensure the win probability for each team is as even as possible
+        prob = LpProblem("CharacterAssignment", LpMinimize)
+        x = [[LpVariable(f"x_{i}_{j}", cat=LpBinary) for j in range(num_characters)] for i in range(num_players)]
 
-    for i, player in players.iterrows():
-        for j, character in characters.iterrows():
-            if character['alignment'] == 'Good':
-                elo = player['elo_good']
-            else:
-                elo = player['elo_evil']
+        ## CONSTRAINT: every player can get at most one character ##
+        for i in range(num_players):
+            prob += lpSum(x[i][j] for j in range(num_characters)) == 1
 
-            norm_elo = normaliseElo(elo)
-            norm_strength = normaliseBaseStrength(character['base_strength'])
-
-            logit = weighted_elo * norm_elo + weighted_strength * norm_strength + intercept
-            win_prob = 1 / (1 + np.exp(-logit))
-            S[i][j] = win_prob
-
-            bias = get_alignment_bias(player['player_id'], character['alignment'])
-            B[i][j] = bias
-
-
-
-    ## Creating an LP problem to assign characters to players to ensure the win probability for each team is as even as possible
-    prob = LpProblem("CharacterAssignment", LpMinimize)
-    x = [[LpVariable(f"x_{i}_{j}", cat=LpBinary) for j in range(num_characters)] for i in range(num_players)]
-
-    ## CONSTRAINT: every player can get at most one character ##
-    for i in range(num_players):
-        prob += lpSum(x[i][j] for j in range(num_characters)) == 1
-
-    ## CONSTRAINT: each character is assigned to at most one player
-    for j in range(num_characters):
-        prob += lpSum(x[i][j] for i in range(num_players)) <= 1
-
-
-
-    ## CONSTRAINT: the number of each roles assigned must match the given requirements for the script
-    player_requirements = {
-        'Townsfolk': num_types[0][1],
-        'Outsider': num_types[0][2],
-        'Minion': num_types[0][3],
-        'Demon': num_types[0][4]
-    }
-    for role_type, required_count in player_requirements.items():
-        role_mask = [1 if characters.loc[j, 'role_type'] == role_type else 0 for j in range(num_characters)]
-        num_align = lpSum(x[i][j] * role_mask[j] for i in range(num_players) for j in range(num_characters))
-        prob += num_align == required_count
-
-    role_usage_caps = {}
-    for role_type, required_count in player_requirements.items():
-        available = sum(1 for j in range(num_characters) if characters.loc[j, 'role_type'] == role_type)
-        temp = int(np.ceil(required_count / available)) if available > 0 else required_count
-        role_usage_caps[role_type] = temp
-
-    for j in range(num_characters):
-        role = characters.loc[j, 'role_type']
-        usage_cap = role_usage_caps.get(role, 1)
-        prob += lpSum(x[i][j] for i in range(num_players)) <= usage_cap
-
-
-
-    ## CONSTRAINT: teams must be as balanced as possible
-    delta = LpVariable("team_balance_gap", lowBound=0)
-    team_sign = [1 if characters.loc[j, 'alignment'] == 'Good' else -1 for j in range(num_characters)]
-
-    good_total = lpSum(x[i][j] * S[i][j] for i in range(num_players) for j in range(num_characters) if team_sign[j] == 1)
-    evil_total = lpSum(x[i][j] * S[i][j] for i in range(num_players) for j in range(num_characters) if team_sign[j] == -1)
-
-    num_good = sum(1 for j in range(num_characters) if team_sign[j] == 1)
-    num_evil = sum(1 for j in range(num_characters) if team_sign[j] == -1)
-
-    av_good = good_total / num_good
-    av_evil = evil_total / num_evil
-
-
-
-    ## OBJECTIVE: minimise the imbalance between teams and maximise bias satisfaction
-    bias_score = lpSum(x[i][j] * B[i][j] for i in range(num_players) for j in range(num_characters))
-    prob += delta - bias_score
-
-
-    # Solve the problem
-    prob.solve()
-
-    assignments = []
-    for i in range(num_players):
+        ## CONSTRAINT: each character is assigned to at most one player
         for j in range(num_characters):
-            if x[i][j].value() == 1:
-                assignments.append({
-                    'player': players.loc[i, 'name'],
-                    'character': characters.loc[j, 'name'],
-                    'win_probability': S[i][j],
-                    'team': characters.loc[j, 'alignment']
-                })
+            prob += lpSum(x[i][j] for i in range(num_players)) <= 1
 
-    # Output the final assignment results
-    assignment_df = pd.DataFrame(assignments)
 
-    webSetUp(assignment_df, script_name)
 
-    print("\nFinal Assignments:")
-    print(assignment_df)
+        ## CONSTRAINT: the number of each roles assigned must match the given requirements for the script
+        player_requirements = {
+            'Townsfolk': num_types[0][1],
+            'Outsider': num_types[0][2],
+            'Minion': num_types[0][3],
+            'Demon': num_types[0][4]
+        }
+        for role_type, required_count in player_requirements.items():
+            role_mask = [1 if characters.loc[j, 'role_type'] == role_type else 0 for j in range(num_characters)]
+            num_align = lpSum(x[i][j] * role_mask[j] for i in range(num_players) for j in range(num_characters))
+            prob += num_align == required_count
+
+        role_usage_caps = {}
+        for role_type, required_count in player_requirements.items():
+            available = sum(1 for j in range(num_characters) if characters.loc[j, 'role_type'] == role_type)
+            temp = int(np.ceil(required_count / available)) if available > 0 else required_count
+            role_usage_caps[role_type] = temp
+
+        for j in range(num_characters):
+            role = characters.loc[j, 'role_type']
+            usage_cap = role_usage_caps.get(role, 1)
+            prob += lpSum(x[i][j] for i in range(num_players)) <= usage_cap
+
+
+
+        ## CONSTRAINT: teams must be as balanced as possible
+        delta = LpVariable("team_balance_gap", lowBound=0)
+        team_sign = [1 if characters.loc[j, 'alignment'] == 'Good' else -1 for j in range(num_characters)]
+
+        good_total = lpSum(x[i][j] * S[i][j] for i in range(num_players) for j in range(num_characters) if team_sign[j] == 1)
+        evil_total = lpSum(x[i][j] * S[i][j] for i in range(num_players) for j in range(num_characters) if team_sign[j] == -1)
+
+        num_good = sum(1 for j in range(num_characters) if team_sign[j] == 1)
+        num_evil = sum(1 for j in range(num_characters) if team_sign[j] == -1)
+
+        av_good = good_total / num_good
+        av_evil = evil_total / num_evil
+
+
+
+        ## OBJECTIVE: minimise the imbalance between teams and maximise bias satisfaction
+        bias_score = lpSum(x[i][j] * B[i][j] for i in range(num_players) for j in range(num_characters))
+        prob += delta - bias_score
+
+
+        # Solve the problem
+        prob.solve()
+
+        assignments = []
+        for i in range(num_players):
+            for j in range(num_characters):
+                if x[i][j].value() == 1:
+                    assignments.append({
+                        'player': players.loc[i, 'name'],
+                        'character': characters.loc[j, 'name'],
+                        'win_probability': S[i][j],
+                        'team': characters.loc[j, 'alignment']
+                    })
+
+        # Output the final assignment results
+        assignment_df = pd.DataFrame(assignments)
+
+    ##    webSetUp(assignment_df, script_name)
+
+        print("\nFinal Assignments:")
+        print(assignment_df)
+        
+        valid_accept = False
+        while not valid_accept:
+            accept_assign = str(input("Accept assignment? Y/N   ")).upper()
+            if accept_assign == "Y":
+                accept = True
+                valid_accept = True
+            elif accept_assign == "N":
+                valid_accept = True
+            else:
+                print("Please enter valid option")
 
  ## Sample example   
 # script = "Sects_and_violets"
