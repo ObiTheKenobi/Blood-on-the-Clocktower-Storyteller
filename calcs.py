@@ -228,18 +228,25 @@ def assignments(script_name, player_list):
         hooks = []
         logging_results = []
 
+
         for char_name, fn in character_constraints.items():
             if char_name in characters['name'].values:
                 char_index = characters[characters['name'] == char_name].index[0]
                 result = fn(prob, x, characters, players, player_requirements, char_index)
+
                 if "_log" in result:
                     print(f"[Constraint Applied] {result['_log']}")
                     logging_results.append({result['_log']})
                 if "_hook" in result:
                     hooks.append(result["_hook"])
+
+                # Remove logs/hooks so only deltas remain
                 result.pop("_log", None)
                 result.pop("_hook", None)
-                adjusted_requirements.update(result)
+
+                # *** Accumulate deltas ***
+                for role_type, delta in result.items():
+                    adjusted_requirements[role_type] = adjusted_requirements.get(role_type, 0) + delta
 
         # --- Summoner special case ---
         if "Summoner" in characters['name'].values:

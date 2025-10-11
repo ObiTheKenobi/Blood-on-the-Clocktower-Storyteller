@@ -16,13 +16,14 @@ def _binary_var(name, prob, x, char_index, players):
 # ----------------------------
 
 def balloonist_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("balloonist_in_play", prob, x, char_index, players)
-    shift = random.choice([0, 1])
+    num_players = len(players)
+    balloonist_in_play = lpSum(x[i][char_index] for i in range(num_players))
     return {
-        "Outsider": player_requirements['Outsider'] + shift * var,
-        "Townsfolk": player_requirements['Townsfolk'] - shift * var,
-        "_log": f"Balloonist → Outsiders +{shift}, Townsfolk -{shift}"
+        "Outsider": +balloonist_in_play,
+        "Townsfolk": -balloonist_in_play,
+        "_log": "Balloonist → Outsiders +1, Townsfolk -1"
     }
+
 
 def bounty_hunter_constraint(prob, x, characters, players, player_requirements, bh_index):
     num_players = len(players)
@@ -125,55 +126,53 @@ def village_idiot_constraint(prob, x, characters, players, player_requirements, 
         return "Village Idiot not in play"
 
     return {
-        "_log": "Village Idiot → 0–3 allowed, if ≥2 then one player is drunk",
+        "_log": "Village Idiot → 0-3 allowed, if ≥2 then one player is drunk",
         "_hook": hook
     }
 
 
 def hermit_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("hermit_in_play", prob, x, char_index, players)
-    shift = random.choice([0, 1])
+    num_players = len(players)
+    hermit_in_play = lpSum(x[i][char_index] for i in range(num_players))
     return {
-        "Outsider": player_requirements['Outsider'] - shift * var,
-        "Townsfolk": player_requirements['Townsfolk'] + shift * var,
-        "_log": f"Hermit → Outsiders -{shift}, Townsfolk +{shift}"
+        "Outsider": -hermit_in_play,
+        "Townsfolk": +hermit_in_play,
+        "_log": "Hermit → Outsiders -1, Townsfolk +1"
     }
 
 
 def baron_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("baron_in_play", prob, x, char_index, players)
+    num_players = len(players)
+    baron_in_play = lpSum(x[i][char_index] for i in range(num_players))
     return {
-        "Outsider": player_requirements['Outsider'] + 2 * var,
-        "Townsfolk": player_requirements['Townsfolk'] - 2 * var,
+        "Outsider": +2 * baron_in_play,
+        "Townsfolk": -2 * baron_in_play,
         "_log": "Baron → Outsiders +2, Townsfolk -2"
     }
 
+
+
 def godfather_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("godfather_in_play", prob, x, char_index, players)
-    shift = random.choice([-1, 1])
+    num_players = len(players)
+    godfather_in_play = lpSum(x[i][char_index] for i in range(num_players))
     return {
-        "Outsider": player_requirements['Outsider'] + shift * var,
-        "Townsfolk": player_requirements['Townsfolk'] - shift * var,
-        "_log": f"Godfather → Outsiders {shift:+}, Townsfolk {(-shift):+}"
+        "Outsider": -1 * godfather_in_play,
+        "Townsfolk": +1 * godfather_in_play,
+        "_log": "Godfather → Outsiders -1, Townsfolk +1"
     }
+
 
 
 # Summoner: -1 Demon, +1 Townsfolk
 def summoner_constraint(prob, x, characters, players, player_requirements, char_index):
-    """
-    Summoner: if in play, reduce Demon count by 1 and increase Townsfolk by 1.
-    """
     num_players = len(players)
-
-    # Binary variable: 1 if Summoner is assigned to any player
     summoner_in_play = lpSum(x[i][char_index] for i in range(num_players))
-
-    # Return adjusted requirements keyed by role_type
     return {
-        "Demon": player_requirements['Demon'] - summoner_in_play,
-        "Townsfolk": player_requirements['Townsfolk'] + summoner_in_play,
+        "Demon": -1 * summoner_in_play,
+        "Townsfolk": +1 * summoner_in_play,
         "_log": "Summoner → Demons -1, Townsfolk +1"
     }
+
 
 
 # Xaan: Outsiders set to random 1–4

@@ -12,8 +12,8 @@ Character | Num players | Passed?
 ** Huntsman | 10 | Y
 ** Village idiot | 8
 ** Village idiot | 10
-Hermit | 8 | 
-Hermit | 10 | 
+** Hermit | 8 | Y
+** Hermit | 10 | Y
 ** Baron | 8 | Y 
 ** Baron | 10 | Y
 Godfather | 8
