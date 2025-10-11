@@ -16,6 +16,7 @@ def assignments(script_name, player_list):
         cur = con.cursor()
     except Exception as e:
         print(f'An error occurred: {e}.')
+        return
 
     query = """
     SELECT *

@@ -1,6 +1,7 @@
 Possbily to automate??
 
 Character | Num players | Passed? 
+
 ** Balloonist | 8 | Y
 ** Balloonist | 10 | Y
 ** Bounty hunter | 8 | Y
