@@ -176,20 +176,37 @@ def summoner_constraint(prob, x, characters, players, player_requirements, char_
 
 
 # Xaan: Outsiders set to random 1–4
-def xaan_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("xaan_in_play", prob, x, char_index, players)
-    outsiders = random.randint(1, 4)
+import numpy as np
+
+def xaan_constraint(prob, x, characters, players, player_requirements, char_index, xaan_target=None):
+    """
+    If Xaan is assigned, enforce Outsiders == k (random 1–4).
+    If not assigned, no effect.
+    """
+    num_players = len(players)
+    xaan_in_play = lpSum(x[i][char_index] for i in range(num_players))
+
+    # Outsider total
+    outsider_indices = characters[characters['role_type'] == 'Outsider'].index.tolist()
+    outsider_total = lpSum(x[i][j] for i in range(num_players) for j in outsider_indices)
+
+    # Pick a target if not provided
+    k = xaan_target if xaan_target is not None else np.random.randint(1, 5)
+
+    # Enforce Outsider count == k only if Xaan is assigned
+    prob += outsider_total >= k * xaan_in_play
+    prob += outsider_total <= k * xaan_in_play + (1 - xaan_in_play) * num_players
+
     return {
-        "Outsider": outsiders * var,
-        "_log": f"Xaan → Outsiders set to {outsiders}"
+        "_log": f"Xaan → Outsiders forced to {k} if assigned"
     }
 
 # Fang Gu: +1 Outsider, -1 Townsfolk
 def fanggu_constraint(prob, x, characters, players, player_requirements, char_index):
     var = _binary_var("fanggu_in_play", prob, x, char_index, players)
     return {
-        "Outsider": player_requirements['Outsider'] + 1 * var,
-        "Townsfolk": player_requirements['Townsfolk'] - 1 * var,
+        "Outsider": 1 * var,
+        "Townsfolk": -1 * var,
         "_log": "Fang Gu → Outsiders +1, Townsfolk -1"
     }
 
@@ -197,65 +214,71 @@ def fanggu_constraint(prob, x, characters, players, player_requirements, char_in
 def kazali_constraint(prob, x, characters, players, player_requirements, char_index):
     var = _binary_var("kazali_in_play", prob, x, char_index, players)
     missing_minions = player_requirements['Minion']
-    # Random split between Townsfolk and Outsiders
     extra_townsfolk = random.randint(0, missing_minions)
     extra_outsiders = missing_minions - extra_townsfolk
     return {
-        "Minion": 0,
-        "Townsfolk": player_requirements['Townsfolk'] + extra_townsfolk * var,
-        "Outsider": player_requirements['Outsider'] + extra_outsiders * var,
+        "Minion": -missing_minions * var,
+        "Townsfolk": extra_townsfolk * var,
+        "Outsider": extra_outsiders * var,
         "_log": f"Kazali → Minions replaced with {extra_townsfolk} Townsfolk + {extra_outsiders} Outsiders"
     }
 
 # Lil' Monsta: -1 Demon, +1 Minion, one Minion babysits
+
 def lilmonsta_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("lilmonsta_in_play", prob, x, char_index, players)
-    def hook(characters, players):
-        minion_indices = characters[characters['role_type'] == 'Minion'].index.tolist()
-        if minion_indices:
-            babysitter_index = random.choice(minion_indices)
-            characters.loc[babysitter_index, 'base_strength'] += 20
-            return f"Lil' Monsta → Minion '{characters.loc[babysitter_index,'name']}' babysits (strength boosted)"
-        return "Lil' Monsta in play but no Minion available"
+    num_players = len(players)
+    y_monsta = LpVariable("lilmonsta_in_play", lowBound=0, upBound=1, cat='Binary')
+
+    # Forbid assigning Lil' Monsta to any player
+    for i in range(num_players):
+        prob += x[i][char_index] == 0
+
+    # Require at least one Minion if Lil' Monsta is in play
+    minion_indices = characters[characters['role_type'] == 'Minion'].index.tolist()
+    if minion_indices:
+        minion_total = lpSum(x[i][j] for i in range(num_players) for j in minion_indices)
+        prob += minion_total >= y_monsta
+    else:
+        prob += y_monsta == 0
+
     return {
-        "Demon": player_requirements['Demon'] - 1 * var,
-        "Minion": player_requirements['Minion'] + 1 * var,
-        "_log": "Lil' Monsta → Demons -1, Minions +1",
-        "_hook": hook
+        "Demon": -1 * y_monsta,
+        "Minion": +1 * y_monsta,
+        "_log": "Lil' Monsta → Demons -1, Minions +1 (global token, must be babysat)",
+        "_var": y_monsta
     }
+
 
 # Lord of Typhon: No Minions, replace with Townsfolk/Outsiders, neighbours become Minions
 def lord_of_typhon_constraint(prob, x, characters, players, player_requirements, char_index):
-    var = _binary_var("lord_typhon_in_play", prob, x, char_index, players)
-    missing_minions = player_requirements['Minion']
-    extra_townsfolk = random.randint(0, missing_minions)
-    extra_outsiders = missing_minions - extra_townsfolk
-    def hook(characters, players):
-        # Find Lord of Typhon's assigned player index
-        lord_index = char_index
-        # Neighbours in circular seating
-        left = (lord_index - 1) % len(players)
-        right = (lord_index + 1) % len(players)
-        # Force them to be Minions
-        characters.loc[left, 'role_type'] = 'Minion'
-        characters.loc[right, 'role_type'] = 'Minion'
-        characters.loc[left, 'alignment'] = 'Evil'
-        characters.loc[right, 'alignment'] = 'Evil'
-        return f"Lord of Typhon → Neighbours '{players.loc[left,'name']}' and '{players.loc[right,'name']}' set as Minions"
-    return {
-        "Minion": 0,
-        "Townsfolk": player_requirements['Townsfolk'] + extra_townsfolk * var,
-        "Outsider": player_requirements['Outsider'] + extra_outsiders * var,
-        "_log": f"Lord of Typhon → Minions replaced with {extra_townsfolk} Townsfolk + {extra_outsiders} Outsiders, neighbours become Minions",
-        "_hook": hook
-    }
+    num_players = len(players)
 
+    # Binary indicator: 1 if Lord Of Typhon is assigned, 0 otherwise
+    var = LpVariable("lord_typhon_in_play", lowBound=0, upBound=1, cat=LpBinary)
+    prob += var == lpSum(x[i][char_index] for i in range(num_players))
+
+    # Randomly decide whether to replace a Townsfolk or an Outsider
+    if random.choice([True, False]):
+        return {
+            "Minion": 1 * var,
+            "Townsfolk": -1 * var,
+            "_log": "Lord Of Typhon → Minions +1, Townsfolk -1"
+        }
+    else:
+        return {
+            "Minion": 1 * var,
+            "Outsider": -1 * var,
+            "_log": "Lord Of Typhon → Minions +1, Outsiders -1"
+        }
+
+
+        
 # Vigormortis: -1 Outsider, +1 Townsfolk
 def vigormortis_constraint(prob, x, characters, players, player_requirements, char_index):
     var = _binary_var("vigormortis_in_play", prob, x, char_index, players)
     return {
-        "Outsider": player_requirements['Outsider'] - 1 * var,
-        "Townsfolk": player_requirements['Townsfolk'] + 1 * var,
+        "Outsider": -1 * var,
+        "Townsfolk": 1 * var,
         "_log": "Vigormortis → Outsiders -1, Townsfolk +1"
     }
 # ----------------------------
@@ -275,7 +298,7 @@ character_constraints = {
     "Fang Gu": fanggu_constraint,
     "Kazali": kazali_constraint,
     "Lil' Monsta": lilmonsta_constraint,
-    "Lord of Typhon": lord_of_typhon_constraint,
+    "Lord Of Typhon": lord_of_typhon_constraint,
     "Vigormortis": vigormortis_constraint
 
 }

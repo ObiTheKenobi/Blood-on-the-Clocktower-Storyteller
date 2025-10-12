@@ -7,7 +7,7 @@ import sqlite3
 import math
 import random
 import db_setup
-from character_constraints import character_constraints
+from character_constraints import character_constraints, xaan_constraint
 
 def assignments(script_name, player_list):
     # Connect to db
@@ -212,6 +212,7 @@ def assignments(script_name, player_list):
         num_players = len(players)
         num_characters = len(characters)
 
+        # Create problem and decision variables
         prob = LpProblem("CharacterAssignment", LpMinimize)
         x = [[LpVariable(f"x_{i}_{j}", cat=LpBinary) for j in range(num_characters)] for i in range(num_players)]
 
@@ -225,30 +226,46 @@ def assignments(script_name, player_list):
 
         # Apply character-specific constraints and collect adjusted requirements
         adjusted_requirements = dict(player_requirements)
-        hooks = []
+        hooks = []  # post-solve hooks only
         logging_results = []
+
+        xaan_index = None
+        xaan_in_play = None
+        xaan_target = None
+
 
 
         for char_name, fn in character_constraints.items():
             if char_name in characters['name'].values:
                 char_index = characters[characters['name'] == char_name].index[0]
-                result = fn(prob, x, characters, players, player_requirements, char_index)
 
+                # Special handling for Xaan
+                if char_name == "Xaan":
+                    xaan_index = char_index
+                    xaan_in_play = lpSum(x[i][xaan_index] for i in range(num_players))
+                    xaan_target = np.random.randint(1, 5)
+                    result = fn(prob, x, characters, players, player_requirements, xaan_index, xaan_target)
+                else:
+                    result = fn(prob, x, characters, players, player_requirements, char_index)
+
+                # Log and collect post-solve hooks
                 if "_log" in result:
                     print(f"[Constraint Applied] {result['_log']}")
                     logging_results.append({result['_log']})
                 if "_hook" in result:
                     hooks.append(result["_hook"])
 
-                # Remove logs/hooks so only deltas remain
+
+                # Remove helper entries before folding into adjusted_requirements
                 result.pop("_log", None)
                 result.pop("_hook", None)
 
-                # *** Accumulate deltas ***
                 for role_type, delta in result.items():
+                    if isinstance(role_type, str) and role_type.startswith("_"):
+                        continue
                     adjusted_requirements[role_type] = adjusted_requirements.get(role_type, 0) + delta
 
-        # --- Summoner special case ---
+        # Summoner role-type deltas
         if "Summoner" in characters['name'].values:
             summoner_index = characters[characters['name'] == "Summoner"].index[0]
             summoner_in_play = lpSum(x[i][summoner_index] for i in range(num_players))
@@ -256,10 +273,18 @@ def assignments(script_name, player_list):
             adjusted_requirements["Townsfolk"] = player_requirements['Townsfolk'] + summoner_in_play
             print("[Constraint Applied] Summoner → Demons -1, Townsfolk +1")
 
-        # Run hooks before building S/B
-        for hook in hooks:
-            msg = hook(characters, players)
-            print(f"[Balance Adjustment] {msg}")
+        # Kazali index for objective weighting
+        kazali_index = characters[characters['name'] == "Kazali"].index[0] if "Kazali" in characters['name'].values else None
+        # Lil' Monsta adjustments (global var created in its constraint)
+        if "Lil' Monsta" in characters['name'].values:
+            try:
+                y_monsta = next(v for v in prob.variables() if v.name == "lilmonsta_in_play")
+            except StopIteration:
+                y_monsta = None
+            minion_indices = characters[characters['role_type'] == 'Minion'].index.tolist()
+            lilmonsta_adjustments = (y_monsta, minion_indices)
+        else:
+            lilmonsta_adjustments = None
 
         # Build S and B
         S = np.zeros((num_players, num_characters))
@@ -273,16 +298,23 @@ def assignments(script_name, player_list):
                 win_prob = 1 / (1 + np.exp(-logit))
                 jitter = np.random.uniform(-0.02, 0.02)
                 if character['role_type'] == 'Minion':
-                    jitter += np.random.uniform(-0.05, 0.05)  # extra jitter to vary minion selections
+                    jitter += np.random.uniform(-0.05, 0.05)
                 S[i][j] = np.clip(win_prob + jitter, 0.0, 1.0)
                 B[i][j] = get_alignment_bias(player['player_id'], character['alignment'])
 
-        # Enforce adjusted role requirements (CRITICAL: no per-character usage caps)
+        # Role totals
+        role_totals = {}
         for role_type in ['Townsfolk', 'Outsider', 'Minion', 'Demon']:
             role_mask = [1 if characters.loc[j, 'role_type'] == role_type else 0 for j in range(num_characters)]
-            role_count = lpSum(x[i][j] * role_mask[j] for i in range(num_players) for j in range(num_characters))
+            role_totals[role_type] = lpSum(x[i][j] * role_mask[j] for i in range(num_players) for j in range(num_characters))
+
+        # Enforce adjusted role requirements (no per-character caps)
+        for role_type in ['Townsfolk', 'Outsider', 'Minion', 'Demon']:
             required_count = adjusted_requirements.get(role_type, player_requirements[role_type])
-            prob += role_count == required_count
+            if role_type == 'Outsider' and xaan_index is not None:
+                continue
+            prob += role_totals[role_type] == required_count
+
 
         # Team balance with tolerance
         team_sign = [1 if characters.loc[j, 'alignment'] == 'Good' else -1 for j in range(num_characters)]
@@ -302,27 +334,70 @@ def assignments(script_name, player_list):
         prob += av_good - av_evil <= tolerance + excess
         prob += av_evil - av_good <= tolerance + excess
 
+        # Objective
         objective = excess - bias_score
+        num_demons = (characters['role_type'] == 'Demon').sum()
+        # Summoner objective buffer
         if "Summoner" in characters['name'].values:
             summoner_var = lpSum(x[i][summoner_index] for i in range(num_players))
-            num_demons  = (characters['role_type'] == 'Demon').sum()
-            print("NUMBER DEMONS =", num_demons)
-            summoner_buffer = ((num_demons + 1) / (num_demons*2)) 
-            print(summoner_buffer)
-            objective += summoner_buffer * summoner_var   # tune weight upwards if Summoner still too frequent
+            
+            summoner_buffer = ((num_demons + 1) / (num_demons * 2))
+            objective += summoner_buffer * summoner_var
+
+        # Kazali objective buffer
+        if kazali_index is not None:
+            kazali_var = lpSum(x[i][kazali_index] for i in range(num_players))
+            
+            kazali_buffer = ((num_demons) / (num_demons + 2)) if num_players <= 8 else (num_players) / (num_demons * 2)
+            objective += kazali_buffer * kazali_var
+        
+
+        lord_index = characters[characters['name'] == "Lord Of Typhon"].index[0] if "Lord Of Typhon" in characters['name'].values else None
+
+        if "Lord Of Typhon" in characters['name'].values and random.random() < (1/num_demons):
+            prob += lpSum(x[i][lord_index] for i in range(num_players)) == 1
+        # prob += lord_of_typhon_var == 1 ### ENFORCING LORD OF TYPHON
+
+        # Light noise
         noise = lpSum(np.random.uniform(-0.05, 0.05) * x[i][j] for i in range(num_players) for j in range(num_characters))
         objective += noise
 
         prob += objective
-        if 'drunk' not in players.columns:
-                players['drunk'] = False
-        else:
-            players['drunk'] = False  # reset each run
 
-        # Solve
+        # Reset drunk flags and solve
+        players['drunk'] = False
         prob.solve()
 
-        # Run post-solve hooks (e.g. BH target resolution)
+        # Post-solve: apply Lil' Monsta boost directly to S (no hooks)
+        if lilmonsta_adjustments:
+            y_monsta, minion_indices = lilmonsta_adjustments
+            val = value(y_monsta) if y_monsta is not None else None
+            if val is not None and val > 0.5 and minion_indices:
+                for j in minion_indices:
+                    for i in range(num_players):
+                        # Recompute S with +20 base_strength for Minions
+                        elo = players.loc[i, 'elo_good'] if characters.loc[j, 'alignment'] == 'Good' else players.loc[i, 'elo_evil']
+                        norm_elo = (elo - 1500) / 400
+                        norm_strength = ((characters.loc[j, 'base_strength'] + 20.0) - 50) / 25
+                        logit = weighted_elo * norm_elo + weighted_strength * norm_strength + intercept
+                        win_prob = 1 / (1 + np.exp(-logit))
+                        S[i][j] = np.clip(win_prob, 0.0, 1.0)
+                print("✅ Lil' Monsta in play: all Minions boosted by +20 base_strength in S.")
+            else:
+                print("ℹ️ Lil' Monsta not in play (no S boost applied).")
+
+        # Post-solve message: Lil’ Monsta babysitting (global token; not assigned to players)
+        try:
+            y_monsta = next(v for v in prob.variables() if v.name == "lilmonsta_in_play")
+            val = value(y_monsta)
+            if val is not None and val > 0.5:
+                print("✅ Lil' Monsta is in play. A Minion must babysit it.")
+            else:
+                print("ℹ️ Lil' Monsta not in play.")
+        except StopIteration:
+            pass
+
+        # Run post-solve hooks (e.g., BH target resolution)
         for hook in hooks:
             msg = hook(characters, players)
             print(f"[Post-Solve Adjustment] {msg}")
@@ -361,9 +436,62 @@ def assignments(script_name, player_list):
                         'drunk': "Drunk" if drunk_flag else "_"
                     })
 
+        # import random
+        # import pandas as pd
+
+        
+        def rearrange_for_lord_of_typhon(assignments_df):
+            # If Lord not present, return unchanged
+            if "Lord Of Typhon" not in assignments_df['character'].values:
+                return assignments_df
+
+            # Split Evil and Good
+            evil_df = assignments_df[assignments_df['team'] == 'Evil'].copy()
+            good_df = assignments_df[assignments_df['team'] == 'Good'].copy()
+
+            # Identify Lord row and other evil
+            lord_row = evil_df[evil_df['character'] == "Lord Of Typhon"]
+            other_evil = evil_df[evil_df['character'] != "Lord Of Typhon"]
+
+            n_minions = len(other_evil)
+            block_size = n_minions + 1  # Lord + Minions
+
+            if block_size < 3:
+                raise ValueError("Lord of Typhon requires at least 2 Minions, so evil block size must be ≥ 3")
+
+            if block_size == 3:
+                # Always Lord in the middle
+                evil_reordered = pd.concat([other_evil.iloc[:1], lord_row, other_evil.iloc[1:]])
+            elif block_size == 4:
+                # Lord can be at position 2 or 3 (1-indexed)
+                if random.choice([True, False]):
+                    evil_reordered = pd.concat([other_evil.iloc[:1], lord_row, other_evil.iloc[1:]])
+                else:
+                    evil_reordered = pd.concat([other_evil.iloc[:2], lord_row, other_evil.iloc[2:]])
+            else:
+                # General case: put Lord at or near the middle
+                mid = block_size // 2
+                if block_size % 2 == 1:
+                    # Odd length: exact middle
+                    evil_reordered = pd.concat([other_evil.iloc[:mid], lord_row, other_evil.iloc[mid:]])
+                else:
+                    # Even length: Lord can be mid or mid+1
+                    if random.choice([True, False]):
+                        evil_reordered = pd.concat([other_evil.iloc[:mid-1], lord_row, other_evil.iloc[mid-1:]])
+                    else:
+                        evil_reordered = pd.concat([other_evil.iloc[:mid], lord_row, other_evil.iloc[mid:]])
+
+            # Random insertion point for the evil block among the good rows
+            good_rows = [row.to_frame().T for _, row in good_df.iterrows()]
+            insert_pos = random.randint(0, len(good_rows))
+            blocks = good_rows[:insert_pos] + [evil_reordered] + good_rows[insert_pos:]
+
+            final_df = pd.concat(blocks, ignore_index=True)
+            return final_df
 
 
         df = pd.DataFrame(assigned)
+        df = rearrange_for_lord_of_typhon(df)
         print("\nFinal Assignments:")
         print(df.to_string(index=False))
         print("\n========== Final Adjusted Role Requirements ==========")
@@ -389,10 +517,10 @@ def assignments(script_name, player_list):
 
 
  ## Sample example   
-script = "Trouble_brewing"
+script = "Se7en"
 # players = ["Liza","Madi", "Rita", "Pedro", "Jed", "Oli", "Rowan", "Gana"]
-players = ["Liza","Madi", "Rita", "Pedro", "Jed", "Oli", "Rowan", "Gana", "Elia"]
-# players = ["Liza","Madi", "Rita", "Pedro", "Jed", "Oli", "Rowan", "Gana", "Elia", "Alona"]
+# players = ["Liza","Madi", "Rita", "Pedro", "Jed", "Oli", "Rowan", "Gana", "Elia"]
+players = ["Liza","Madi", "Rita", "Pedro", "Jed", "Oli", "Rowan", "Gana", "Elia", "Alona"]
 # players = ["Liza","Madi", "Rita", "Pedro", "Jed", "Oli", "Rowan", "Gana", "Elia", "Alona", "Rowan2", "George"]
 
 assignments(script, players)

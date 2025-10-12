@@ -16,21 +16,21 @@ Character | Num players | Passed?
 ** Hermit | 10 | Y
 ** Baron | 8 | Y 
 ** Baron | 10 | Y
-Godfather | 8
-Godfather | 10
+** Godfather | 8 | Y
+** Godfather | 10 | Y
 ** Summoner | 8 | Y
 ** Summoner | 10 | Y
-Xaan | 8
-Xaan | 10
-Fang gu | 8
-Fang gu | 10
-Kazali | 8
-Kazali | 10
-Lil' monsta | 8
-Lil' monsta | 10
-Lord of Typhon | 8
-Lord of Typhon | 10
-Vigormortis | 8
-Vigormortis | 10
+** Xaan | 8 | Y
+** Xaan | 10 | Y
+** Fang gu | 8 | Y
+** Fang gu | 10 | Y
+** Kazali | 8 | Y
+** Kazali | 10 | Y
+** Lil' monsta | 8 | Y
+** Lil' monsta | 10 | Y 
+** Lord of Typhon | 8 | Y
+** Lord of Typhon | 10 | Y
+** | Vigormortis | 8 | Y
+** Vigormortis | 10 | Y
 
 
