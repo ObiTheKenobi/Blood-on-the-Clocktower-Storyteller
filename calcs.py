@@ -588,6 +588,11 @@ def assignments(script_name, player_list,
         print(logging_results)
         print(to_output)
 
+
+        
+        from character_functions import find_not_in_play
+        print(find_not_in_play(df, characters))
+
         # accept?
         valid_accept = False
         while not valid_accept:
@@ -610,7 +615,7 @@ def assignments(script_name, player_list,
 
 
 script = "Fargo"
-players = ["Madi","Rita","Pedro","Jed","Oli","Rowan2","Gana","Grace","Alona"]
+players = ["Madi","Rita","Pedro","Jed","Oli","Rowan2","Gana","Grace","Alona","Liza"]
 fixed_teams = {"Alona":"Good", "Oli": "Good"}
 fixed_characters = {"Rowan2":"Organ Grinder", "Pedro":"Banshee", "Grace":"Courtier","Oli":"Alsaahir","Madi":"Cult Leader"}
 fixed_role_types = {"Rita": "Demon"}
@@ -625,4 +630,5 @@ assignments(
     included_characters=included_characters,
     excluded_characters=excluded_characters,
     extra_randomness=0.3)
+
 
