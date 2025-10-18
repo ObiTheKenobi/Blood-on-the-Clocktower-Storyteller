@@ -9,11 +9,21 @@ import random
 import db_setup
 from character_constraints import character_constraints, xaan_constraint
 
-def assignments(script_name, player_list, fixed_teams=None, fixed_characters=None, extra_randomness=0.0, seed=None):
+def assignments(script_name, player_list,
+                fixed_teams=None,
+                fixed_characters=None,
+                fixed_role_types=None,
+                included_characters=None,
+                excluded_characters=None,
+                extra_randomness=0.0,
+                seed=None):
     """
     New optional args:
       - fixed_teams: dict player_name -> "Good" or "Evil"
       - fixed_characters: dict player_name -> character_name
+      - fixed_role_types: dict player_name -> "Townsfolk"|"Outsider"|"Minion"|"Demon"
+      - included_characters: list of character names that must be in play (assigned to someone)
+      - excluded_characters: list of character names that must not be in play
       - extra_randomness: float >= 0 to amplify jitter/noise and reduce predictability
       - seed: optional int for reproducible randomness
     """
@@ -21,6 +31,12 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
         fixed_teams = {}
     if fixed_characters is None:
         fixed_characters = {}
+    if fixed_role_types is None:
+        fixed_role_types = {}
+    if included_characters is None:
+        included_characters = []
+    if excluded_characters is None:
+        excluded_characters = []
     if seed is not None:
         random.seed(seed)
         np.random.seed(seed)
@@ -40,7 +56,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
     """.format(','.join(['?'] * len(player_list)))
 
     cur.execute(query, tuple(player_list))
-    rows = cur.fetchall() 
+    rows = cur.fetchall()
 
     # Convert output into lists
     a, b, c, d = zip(*rows)
@@ -101,6 +117,35 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
         'base_strength': char_strengths,
         'role_type': char_types
     }).sample(frac=1, random_state=seed).reset_index(drop=True)
+
+    # --- handle excluded_characters by removing them from the pool ---
+    if excluded_characters:
+        present = set(characters['name'].values)
+        missing_excluded = [n for n in excluded_characters if n not in present]
+        if missing_excluded:
+            print(f"[Excluded Filter] Note: these characters requested for exclusion not present (ignored): {missing_excluded}")
+        characters = characters[~characters['name'].isin(excluded_characters)].reset_index(drop=True)
+
+    # Build mapping name -> original index (after exclusion)
+    name_to_char_index = {characters.loc[j, 'name']: j for j in range(len(characters))}
+    # Check included list presence (do not require full pool listing)
+    included_present = []
+    missing_included = []
+    if included_characters:
+        for name in included_characters:
+            if name in name_to_char_index:
+                included_present.append(name)
+            else:
+                missing_included.append(name)
+        if missing_included:
+            print(f"[Included Filter] Warning: these included characters not found in script or were excluded: {missing_included}")
+
+    # re-compute num_characters after filtering
+    num_characters = len(characters)
+    if num_characters == 0:
+        print("[Character Filter] Error: No characters available after exclusion filtering.")
+        con.close()
+        return
 
     query = """
     SELECT player_id, character_id, team, won
@@ -166,10 +211,9 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
         # fallback empty arrays for PyMC
         game_data = pd.DataFrame(columns=['player_id','character_id','alignment','won','normalized_elo','normalized_strength'])
 
-    # --- Alignment bias from history --- (now with small random flips to reduce predictability)
+    # --- Alignment bias from history ---
     def get_alignment_bias(player_id, target_alignment):
         history = recent_history.get(player_id, [])
-        # small probabilistic flip: sometimes ignore the top history element
         if extra_randomness > 0 and history:
             if random.random() < min(0.15 * (extra_randomness + 1), 0.5):
                 history = history[1:] if len(history) > 1 else history
@@ -220,7 +264,6 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
 
             logits = (weighted_elo * theta) + (weighted_strength * phi) + intercept
             p = pm.Deterministic('p', pm.math.sigmoid(logits))
-            # if no observed data, avoid Bernoulli with empty observed; use a dummy small vector
             observed = game_data['won'].values if not game_data.empty else np.array([0])
             pm.Bernoulli('outcome', p=p, observed=observed)
 
@@ -255,7 +298,6 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
             if pname in name_to_player_index and cname in name_to_char_index:
                 i = name_to_player_index[pname]
                 j = name_to_char_index[cname]
-                # Force x[i][j] == 1 and all other x[i][k] == 0
                 prob += x[i][j] == 1
                 for k in range(num_characters):
                     if k != j:
@@ -270,13 +312,34 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
                 print(f"[Fixed] Warning: could not enforce team for {pname} (player not in list)")
                 continue
             i = name_to_player_index[pname]
-            # sum of x[i][j] for characters with that alignment must equal 1
             mask = [1 if characters.loc[j,'alignment'] == team else 0 for j in range(num_characters)]
             if sum(mask) == 0:
                 print(f"[Fixed] Warning: no characters of alignment {team} to assign for {pname}")
                 continue
             prob += lpSum(x[i][j] * mask[j] for j in range(num_characters)) == 1
             print(f"[Fixed] Player {pname} forced to team {team}")
+
+        # fixed role-type constraints (new): force a player to be assigned some character of the requested role_type
+        for pname, role_type in fixed_role_types.items():
+            if pname not in name_to_player_index:
+                print(f"[Fixed Role] Warning: player {pname} not in player list; cannot enforce role {role_type}")
+                continue
+            if role_type not in ['Townsfolk', 'Outsider', 'Minion', 'Demon']:
+                print(f"[Fixed Role] Warning: unknown role_type {role_type} for player {pname}")
+                continue
+            i = name_to_player_index[pname]
+            role_mask = [1 if characters.loc[j,'role_type'] == role_type else 0 for j in range(num_characters)]
+            if sum(role_mask) == 0:
+                print(f"[Fixed Role] Warning: no available characters of role {role_type} to satisfy player {pname}")
+                continue
+            prob += lpSum(x[i][j] * role_mask[j] for j in range(num_characters)) == 1
+            print(f"[Fixed Role] Player {pname} forced to role {role_type}")
+
+        # Enforce included_characters: every included character must be assigned to exactly one player
+        for cname in included_present:
+            j = name_to_char_index[cname]
+            prob += lpSum(x[i][j] for i in range(num_players)) == 1
+            print(f"[Included] Character {cname} will be in play (assigned to some player).")
 
         # Apply character-specific constraints and collect adjusted requirements
         adjusted_requirements = dict(player_requirements)
@@ -312,7 +375,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
                         continue
                     adjusted_requirements[role_type] = adjusted_requirements.get(role_type, 0) + delta
 
-        # Summoner role-type deltas (same behaviour)
+        # Summoner role-type deltas
         if "Summoner" in characters['name'].values:
             summoner_index = characters[characters['name'] == "Summoner"].index[0]
             summoner_in_play = lpSum(x[i][summoner_index] for i in range(num_players))
@@ -320,7 +383,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
             adjusted_requirements["Townsfolk"] = player_requirements['Townsfolk'] + summoner_in_play
             print("[Constraint Applied] Summoner → Demons -1, Townsfolk +1")
 
-        # Kazali and Lil' Monsta handling left as before
+        # Kazali and Lil' Monsta handling
         kazali_index = characters[characters['name'] == "Kazali"].index[0] if "Kazali" in characters['name'].values else None
         if "Lil' Monsta" in characters['name'].values:
             try:
@@ -342,9 +405,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
                 norm_strength = (character['base_strength'] - 50) / 25
                 logit = weighted_elo * norm_elo + weighted_strength * norm_strength + intercept
                 win_prob = 1 / (1 + np.exp(-logit))
-                # base jitter
                 base_jitter = np.random.uniform(-0.02, 0.02)
-                # amplify if extra_randomness > 0
                 amplified = base_jitter * (1.0 + extra_randomness)
                 if character['role_type'] == 'Minion':
                     amplified += np.random.uniform(-0.05, 0.05) * (1.0 + extra_randomness * 0.5)
@@ -364,7 +425,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
                 continue
             prob += role_totals[role_type] == required_count
 
-        # Team balance with tolerance (unchanged)
+        # Team balance with tolerance
         team_sign = [1 if characters.loc[j, 'alignment'] == 'Good' else -1 for j in range(num_characters)]
         good_total = lpSum(x[i][j] * S[i][j] for i in range(num_players) for j in range(num_characters) if team_sign[j] == 1)
         evil_total = lpSum(x[i][j] * S[i][j] for i in range(num_players) for j in range(num_characters) if team_sign[j] == -1)
@@ -387,6 +448,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
         num_demons = (characters['role_type'] == 'Demon').sum()
 
         if "Summoner" in characters['name'].values:
+            summoner_index = characters[characters['name'] == "Summoner"].index[0]
             summoner_var = lpSum(x[i][summoner_index] for i in range(num_players))
             summoner_buffer = ((num_demons + 1) / (num_demons * 2))
             objective += summoner_buffer * summoner_var
@@ -396,7 +458,7 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
             kazali_buffer = ((num_demons) / (num_demons + 2)) if num_players <= 8 else (num_players) / (num_demons * 2)
             objective += kazali_buffer * kazali_var
 
-        # Lord of Typhon random enforcement kept (unchanged)
+        # Lord of Typhon random enforcement kept
         lord_index = characters[characters['name'] == "Lord Of Typhon"].index[0] if "Lord Of Typhon" in characters['name'].values else None
         if "Lord Of Typhon" in characters['name'].values and random.random() < (1/num_demons):
             prob += lpSum(x[i][lord_index] for i in range(num_players)) == 1
@@ -550,9 +612,17 @@ def assignments(script_name, player_list, fixed_teams=None, fixed_characters=Non
 script = "Fargo"
 players = ["Madi","Rita","Pedro","Jed","Oli","Rowan2","Gana","Grace","Alona"]
 fixed_teams = {"Alona":"Good", "Oli": "Good"}
-fixed_characters = {"Rowan2":"Organ Grinder", "Rita":"Pukka","Pedro":"Banshee", "Grace":"Courtier","Oli":"Alsaahir","Madi":"Cult Leader"}
-assignments(script, players, fixed_teams=fixed_teams, fixed_characters=fixed_characters, extra_randomness=0.3)
+fixed_characters = {"Rowan2":"Organ Grinder", "Pedro":"Banshee", "Grace":"Courtier","Oli":"Alsaahir","Madi":"Cult Leader"}
+fixed_role_types = {"Rita": "Demon"}
+included_characters = ["Pukka"]
+excluded_characters = ["Lord Of Typhon", "Kazali"]
+assignments(
+    script, 
+    players, 
+    fixed_teams=fixed_teams, 
+    fixed_characters=fixed_characters, 
+    fixed_role_types=fixed_role_types,
+    included_characters=included_characters,
+    excluded_characters=excluded_characters,
+    extra_randomness=0.3)
 
-# choose the role type of a player
-# choose which character is in play generally (not tied to a specific player)
-# choose which character is not in play

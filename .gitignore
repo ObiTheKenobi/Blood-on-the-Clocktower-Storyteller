@@ -8,3 +8,5 @@ features/steps/calculator_steps.py
 /botc_discord_bot
 temp.txt
 temp.txt
+features/calcs_features.feature
+features/steps/calcs_steps.py
