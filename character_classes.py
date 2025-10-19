@@ -1,150 +1,618 @@
-## changing functions to classes
-
 import pandas as pd
 
-class Character:
-    """
-    Character helper that stores assignment and script character DataFrames.
-    Use instance methods which operate on the stored data.
-    """
+# ------------------ Utility Functions ------------------
 
-    def __init__(self, assigned_df=None, all_characters_df=None):
-        self.assigned_df = assigned_df if assigned_df is not None else pd.DataFrame()
-        self.all_characters_df = all_characters_df if all_characters_df is not None else pd.DataFrame()
+def extract_names(df_or_list):
+    """
+    Return a single formatted string of names.
+    Accepts either a pandas DataFrame or a list of strings.
+    If DataFrame: uses 'name' column first, then 'character'.
+    If list: joins items directly.
+    Returns "DF empty" if input is None or empty.
+    """
+    if df_or_list is None:
+        return "DF empty"
 
-    # -------------------------
-    # DataFrame extraction helpers
-    # -------------------------
-    @staticmethod
-    def extract_names(df):
-        if df is None or df.empty:
+    # Handle list input
+    if isinstance(df_or_list, list):
+        if not df_or_list:
             return "DF empty"
-        if 'name' in df.columns:
-            return ' OR '.join(df['name'].astype(str).tolist())
-        if 'character' in df.columns:
-            return ' OR '.join(df['character'].astype(str).tolist())
+        return ' OR '.join(str(item) for item in df_or_list)
+
+    # Handle DataFrame input
+    if isinstance(df_or_list, pd.DataFrame):
+        if df_or_list.empty:
+            return "DF empty"
+        if 'name' in df_or_list.columns:
+            return ' OR '.join(df_or_list['name'].astype(str).tolist())
+        if 'character' in df_or_list.columns:
+            return ' OR '.join(df_or_list['character'].astype(str).tolist())
         raise ValueError("DataFrame must contain 'name' or 'character' column")
 
-    @staticmethod
-    def _df_to_name_list(df):
-        if df is None or df.empty:
-            return []
-        if 'name' in df.columns:
-            return df['name'].astype(str).tolist()
-        if 'character' in df.columns:
-            return df['character'].astype(str).tolist()
-        raise ValueError("DataFrame must contain 'name' or 'character' column")
+    raise TypeError("Input must be a pandas DataFrame or a list")
 
-    # -------------------------
-    # Core matching helpers (use stored frames)
-    # -------------------------
-    def find_not_in_play(self, role_type=None):
-        """
-        Return names from all_characters_df that are not present in assigned_df.
-        If role_type is provided, filter all_characters_df by role_type first.
-        Matching priority:
-          1) character_id (if present in both)
-          2) assignments_df.character -> all_characters_df.name
-        """
-        assigned = self.assigned_df
-        all_chars = self.all_characters_df
+def _df_to_name_list(df: pd.DataFrame):
+    if df is None or df.empty:
+        return []
+    if 'name' in df.columns:
+        return df['name'].astype(str).tolist()
+    if 'character' in df.columns:
+        return df['character'].astype(str).tolist()
+    raise ValueError("DataFrame must contain 'name' or 'character' column")
 
-        if all_chars is None or all_chars.empty:
-            return []
+def find_not_in_play(assignments_df: pd.DataFrame,
+                     all_characters_df: pd.DataFrame,
+                     role_type: str = None):
+    if all_characters_df is None or all_characters_df.empty:
+        return []
 
-        chars = all_chars
-        if role_type is not None:
-            if role_type not in {'Townsfolk', 'Outsider', 'Minion', 'Demon'}:
-                raise ValueError(f"Unknown role_type: {role_type}")
-            chars = chars[chars['role_type'] == role_type].copy()
-            if chars.empty:
-                return []
+    if role_type:
+        all_characters_df = all_characters_df[all_characters_df['role_type'] == role_type]
 
-        # Prefer character_id matching
-        if (assigned is not None
-                and 'character_id' in assigned.columns
-                and 'character_id' in chars.columns):
-            assigned_ids = set(assigned['character_id'].dropna().astype(int).unique())
-            mask_has_id = chars['character_id'].notna()
-            mask_not_assigned = mask_has_id & (~chars['character_id'].astype(int).isin(assigned_ids))
-            return Character._df_to_name_list(chars[mask_not_assigned].reset_index(drop=True))
+    if 'character_id' in assignments_df.columns and 'character_id' in all_characters_df.columns:
+        assigned_ids = set(assignments_df['character_id'].dropna().astype(int).unique())
+        mask = ~all_characters_df['character_id'].dropna().astype(int).isin(assigned_ids)
+        return _df_to_name_list(all_characters_df[mask].reset_index(drop=True))
 
-        # Otherwise try name/character matching
-        if (assigned is not None
-                and 'character' in assigned.columns
-                and 'name' in chars.columns):
-            assigned_names = set(assigned['character'].dropna().astype(str).unique())
-            mask_not_assigned = ~chars['name'].astype(str).isin(assigned_names)
-            return Character._df_to_name_list(chars[mask_not_assigned].reset_index(drop=True))
+    if 'character' in assignments_df.columns and 'name' in all_characters_df.columns:
+        assigned_names = set(assignments_df['character'].dropna().astype(str).unique())
+        mask = ~all_characters_df['name'].astype(str).isin(assigned_names)
+        return _df_to_name_list(all_characters_df[mask].reset_index(drop=True))
 
-        raise ValueError("assignments_df must contain 'character' or 'character_id' and all_characters_df must contain corresponding keys")
+    raise ValueError("assignments_df must contain 'character' or 'character_id' and all_characters_df must contain corresponding keys")
 
-    def filter_jinxes(self, jinxes, not_in_play_characters=None):
-        """
-        Return jinxes filtered to characters listed in not_in_play_characters.
-        If not_in_play_characters is None, compute from stored frames across all roles.
-        """
-        not_in_play = not_in_play_characters
-        if not_in_play is None:
-            not_in_play = self.find_not_in_play()
-        not_in_play_set = set(str(x) for x in not_in_play)
-        return {char: text for char, text in jinxes.items() if char in not_in_play_set}
-    def info(self):
-        return None
+def filterJinxes(jinxes, not_in_play_characters):
+    return {char: jinxes[char] for char in not_in_play_characters if char in jinxes}
 
-#######################################################################################
+# ------------------ Base Character Class ------------------
+
+class Character:
+    def __init__(self, ability: bool, poisoned: bool, drunk: bool, dead: bool, team: str,
+                 assignments_df: pd.DataFrame = None,
+                 characters_df: pd.DataFrame = None):
+        self.ability = ability
+        self.poisoned = poisoned
+        self.drunk = drunk
+        self.dead = dead
+        self.team = team,
+        self.assignments_df = assignments_df
+        self.characters_df = characters_df
+
+    def set_ability(self, value): self.ability = bool(value)
+    def set_poisoned(self, value): self.poisoned = bool(value)
+    def set_drunk(self, value): self.drunk = bool(value)
+    def set_dead(self, value): self.dead = bool(value)
+    def set_team(self, value): self.team = str(value)
+
+    def get_ability(self): return self.ability
+    def get_poisoned(self): return self.poisoned
+    def get_drunk(self): return self.drunk
+    def get_dead(self): return self.dead
+    def get_team(self): return self.team
+
+    def current_state(self):
+        print("Ability =", self.ability)
+        print("Poisoned =", self.poisoned)
+        print("Drunk =", self.drunk)
+        print("Dead =", self.dead)
+        print("Team =", self.team)
+
+    def info(self, info_type: str):
+        return None  # Default fallback
+
+
+######################################################################################################
 class Template(Character):
-    """
-    Courtier subclass that provides courtier-specific info.
-    The assigned and all_characters frames are taken from the Character base instance.
-    The ability flag is persistent on the Courtier instance and can be toggled.
-    """
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
 
-    def __init__(self, assigned_df=None, all_characters_df=None, ability=True):
-        super().__init__(assigned_df=assigned_df, all_characters_df=all_characters_df)
-        self.ability = True
-
-    def set_ability(self, value):
-        self.ability = bool(value)
-
-    def template_info(self, info_type):
+    def info(self, info_type: str):
         info_type = str(info_type)
 
         if info_type == "setup":
             setup_rules = None
-            jinxes = None
-            not_in_play = self.find_not_in_play()
-            filtered_jinxes = self.filter_jinxes(jinxes, not_in_play)
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
             return [setup_rules, filtered_jinxes]
 
         elif info_type == "firstnight":
             first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
             return first_night_to_do
 
         elif info_type == "othernights":
+            other_nights_to_do = None
             if self.ability:
                 other_nights_to_do = None
-                return other_nights_to_do
-            return None
+            return other_nights_to_do
 
-        elif info_type == "killed" or info_type == "executed":
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+######################################################################################################
+class Acrobat(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Choose a player, if they are drunk or poisoned, mark acrobat as dead"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Alchemist(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            not_in_play_minions = find_not_in_play(self.assignments_df, self.characters_df, "Minion")
+            setup_rules = "Choose a not in play minion ability. Available minions: " + extract_names(not_in_play_minions)
+            jinxes = {
+                "Boffin":"If the alchemist has the boffin ability, the alchemist does not learn what ability the demon has",
+                "Marionette":"Alchemist learns they are the marionette and therefore must be sat next to the demon/recluse",
+                "Mastermind":"Mastermind is guaranteed not in play, and alchemist has no mastermind ability",
+                "Orang Grinder":"If alchemist has organ grinder ability, then the organ grinder is in play. If both the alchemist and organ gridner are sober, both are drunk",
+                "Spy":"Alchemist does not have spy ability, and a spy is put into play. Each day, after execution, the alchemist can publicy guess a living player as the spy. If correct, the demon must choose the spy tonight.",
+                "Summoner":"Alchemist does not get bluffs, and chooses which demon but not which player. If they die before this happens, evil wins [REMOVE DEMON]",
+                "Widow":"Alchemist does not have widow ability, and a widow is put into play. Each day, after execution, the alchemist can publicy guess a living player as the widow. If correct, the demon must choose the widow tonight.",
+                "Wraith":"Alchemist does not have wraith ability, and a wraith is put into play. Each day, after execution, the alchemist can publicy guess a living player as the wraith. If correct, the demon must choose the wraith tonight."
+            }
+            filtered_jinxes = filterJinxes(jinxes, not_in_play_minions)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Please refer to the chosen minion. If any abilities chosen mess with gameplay, ask the player to choose otherwise"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Please refer to the chosen minion. If any abilities chosen mess with gameplay, ask the player to choose otherwise"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = "Please refer to the chosen minion. If any abilities chosen mess with gameplay, ask the player to choose otherwise"
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Alsaahir(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {"Vizier":"The alchemist must also guess which demon(s) are in play"}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+        
+class Amnesiac(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "Decide the ability of the amnesiac"
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Dependant on the chosen ability"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Dependant on the chosen ability"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = "Dependant on the chosen ability"
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Artist(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        if info_type in {"killed", "executed"}:
+            self.ability = False
+        return None
+
+class Atheist(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    ## NEEDS FILLING OUT ##
+    def info(self, info_type: str):
+        return None
+
+class Balloonist(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "+0/+1 outsiders"
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell balloonist the name of a player"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Tell balloonist the name of a player of a different type to last night"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Banshee(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+            "Leviathan": "Banshee gains ability when they die (possibly by execution)",
+            "Riot": "Banshee gains ability when they die (possibly by execution)",
+            "Vortox":"Players still learn that the banshee has died"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type == "killed":
+            death_to_do = "Announce the banshee's death to everyone. NOTE: banshee can now vote twice and nominate twice even when dead"
+            return death_to_do
+
+        elif info_type == "executed":
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class BountyHunter(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "One townsfolk is evil (and is aware they are)"
+            jinxes = {
+                "Kazali":"An evil townsfolk is only created if the bounty hunter is still in play after the kazali acts",
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Choose an evil player to be known, and tell the bounty hunter"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "If the evil player who was known is dead, choose a new evil player"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Cannibal(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Butler":"Cannibal learns they have gained the butler ability",
+                "Juggler":"If the juggler died by execution on their first day, the living cannibal learns how many guesses the juggler got correct",
+                "Poppy Grower":"Cannibal with poppy grower ability who dies/loses it causes minions and demon to learn each other",
+                "Princess":"If the cannibal nominates, executes and kills the princess today, the demon doesn't kill tonight",
+                "Zealot":"Cannibal learns they have gained the zealot ability"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "If a good player has been executed, the cannibal now has this ability (BUT IS NOT INFORMED WHICH ONE) and wakes when that character would normally. If an evil player is executed, the cannibal is poisoned, and should be woken when the evil character normally would and pretend they have this ability"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Chambermaid(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Mathematician":"Chambermaid learns if the mathematician wakes tonight or not even though the chambermaid wakes first"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Chambermaid chooses 2 alive players except themself, and inform them how many of them woke tonight"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Chambermaid chooses 2 alive players except themself, and inform them how many of them woke tonight"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Chef(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell the chef how many pairs of neighbouring evil players there are"
+                self.ability = False
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Choirboy(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "King must be in play"
+            jinxes = {
+                "Kazali":"The kazali cannot choose the king to become a minion if a choirboy is in play"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "If the demon kills the king, tell the choirboy which player the demon is "
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Clockmaker(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Summoner":"If the summoner is in play, the clockmaker only gets info when the demon is created"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell the clockmaker how many steps from the demon the nearest minion is (1 = sat nexxt to)"
+                self.ability = False
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
             death_to_do = None
             return death_to_do
 
         else:
             raise ValueError(f"Unknown info_type: {info_type}")
-#######################################################################################
 
 class Courtier(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
 
-    def __init__(self, assigned_df=None, all_characters_df=None, ability=True):
-        super().__init__(assigned_df=assigned_df, all_characters_df=all_characters_df)
-        self.ability = True
-
-    def set_ability(self, value):
-        self.ability = bool(value)
-
-    def info(self, info_type):
+    def info(self, info_type: str):
         info_type = str(info_type)
 
         if info_type == "setup":
@@ -153,20 +621,665 @@ class Courtier(Character):
                 "Summoner": "If the summoner is drunk on the 3rd night, the summoner chooses which demon, but storyteller chooses which player",
                 "Vizier": "If the vizier loses their ability they learn this, if the vizier is executed while they have their ability, the vizier's team wins"
             }
-            not_in_play = self.find_not_in_play()
-            filtered_jinxes = self.filter_jinxes(jinxes, not_in_play)
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
             return [setup_rules, filtered_jinxes]
 
         elif info_type == "firstnight":
-            return "Ask the courtier if they would like to use their ability"
+            first_night_to_do = "Ask the courtier if they would like to use their ability"
+            return first_night_to_do
 
         elif info_type == "othernights":
+            other_nights_to_do = None
             if self.ability:
-                return "Ask the courtier if they would like to use their ability"
-            return None
+                other_nights_to_do = "Ask the courtier if they would like to use their ability" 
+            return other_nights_to_do
 
-        elif info_type == "killed" or info_type == "executed":
-            return None
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
 
         else:
             raise ValueError(f"Unknown info_type: {info_type}")
+
+class CultLeader(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Boffin":"If the demon has the cult leader ability, they can't turn good due to this ability",
+                "Pit Hag":"If the pit hag turns an evil player into the cult leader, they can't turn good due to their own ability"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "If both alive neighbours are good, cult leader is good, if both are evil, cult leader is evil, else choose good or evil"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "If both alive neighbours are good, cult leader is good, if both are evil, cult leader is evil, else choose good or evil"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Dreamer(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell the dreamer a good role and an evil role for the chosen player"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Tell the dreamer a good role and an evil role for the chosen player"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Empath(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell empath how many of their neighbours are evil"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Tell empath how many of their neighbours are evil"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Engineer(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Legion":"Legion and engineer cannot both be in play at the start of the game. If the engineer creates legion, most players (including all evil players) become legion"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Once per game, allow player option to choose which minions or which demon is in play"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Once per game, allow player option to choose which minions or which demon is in play"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Exorcist(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Leviathan":"Evil does not win when more than 1 good player has been executed, if the exorcist is alive and has ever successfully chosen the leviathan",
+                "Riot":"If the exorcist chooses the riot on the 3rd night, minions do not become riot",
+                "Yaggababble":"If the exorcist chooses the yaggababble, the yaggababble ability does not kill tonight"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Exorcist chooses one player, if they choose the demon, the demon is told which player the exorcist is, but cannot then use their ability that night (CANNOT CHOOSE SAME PLAYER 2 NIGHTS IN A ROW). Any other demon abilities still function (e.g. player attacked by pukka the previous night is still killed, the shabaloth can still regurgitate a player)"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Farmer(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Leviathan":"A farmer chosen by the leviathan uses their ability but does not die",
+                "Riot":"A farmer chosen by the riot uses their ability but does not die"}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type == "executed":
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+        
+        elif info_type == "killed":
+            death_to_do = "An alive good player must become a farmer, and any ongoing effects of their old character must immediately end"
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Fisherman(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        if info_type in {"killed", "executed"}:
+            self.ability = False
+        return None
+
+class Flowergirl(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Tell flowergirl whether the demon voted during that day"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Fool(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            if self.ability:
+                death_to_do = "Fool is not actually dead, they remain alive"
+                self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class FortuneTeller(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "Choose one player to be the fortune teller's red herring"
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Get the fortune teller to point to 2 players, if either chosen is the demon/red herring, tell the fortune teller yes"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Get the fortune teller to point to 2 players, if either chosen is the demon/red herring, tell the fortune teller yes"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Gambler(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Gambler chooses a player (dead/alive/themself) and the character they think they are. If incorrect, the gambler dies"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class General(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell general which team you think is winning (Good/Evil/Neither)"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Tell general which team you think is winning (Good/Evil/Neither)"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Gossip(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "If the gossip has said a true public statement today, kill a player"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Grandmother(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "Choose a grandchild for the grandmother"
+            jinxes = {
+                "Leviathan":"If a leviathan is in play and the grandchild dies by execution, evil wins",
+                "Riot":"If riot is in play and the grandchild dies during the day, the grandmother dies too"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell the grandmother who their grandchild is"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "If the granchild is dead, the grandmother dies too"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class HighPriestess(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {}
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell the high priestess which player they should talk to the most (Good/Evil, Dead/Alive)"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Tell the high priestess which player they should talk to the most (Good/Evil, Dead/Alive)"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Huntsman(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = "Damsel must be in play"
+            jinxes = {
+                "Kazali":"If the kazali chooses the damsel to become a minion, and a huntsman is in play, a good player becomes the damsel",
+                "Marionette":"If the marionette thinks they are the huntsman, the damsel is added"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Ask huntsman if they want to guess who the damsel is. If correct, the damsel becomes a not in play townsfolk"
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Ask huntsman if they want to guess who the damsel is. If correct, the damsel becomes a not in play townsfolk"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Innkeeper(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Leviathan":"If a leviathan is in play, the innkeeper protected players are safe from all evil abilities",
+                "Riot":"If riot is in play, the innkeeper protected player is safe from all evil abilities"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = None
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = "Innkeeper chooses 2 players, both are marked as safe (CANNOT DIE TONIGHT), one is marked drunk"
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+class Investigator(Character):
+    def __init__(self, ability=True, poisoned=False, drunk=False, dead=False, team="Good",
+                 assignments_df=None, characters_df=None):
+        super().__init__(ability, poisoned, drunk, dead, team, assignments_df, characters_df)
+
+    def info(self, info_type: str):
+        info_type = str(info_type)
+
+        if info_type == "setup":
+            setup_rules = None
+            jinxes = {
+                "Vizier":"If the investigator learns the vizier is in play, the existence of the vizier is not announced by the storyteller"
+            }
+            not_in_play = find_not_in_play(self.assignments_df, self.characters_df)
+            filtered_jinxes = filterJinxes(jinxes, not_in_play)
+            return [setup_rules, filtered_jinxes]
+
+        elif info_type == "firstnight":
+            first_night_to_do = None
+            if self.ability:
+                first_night_to_do = "Tell the investigator the names of 2 players, one of which is a minion"
+                self.ability = False
+            return first_night_to_do
+
+        elif info_type == "othernights":
+            other_nights_to_do = None
+            if self.ability:
+                other_nights_to_do = None
+            return other_nights_to_do
+
+        elif info_type in {"killed", "executed"}:
+            death_to_do = None
+            self.ability = False
+            return death_to_do
+
+        else:
+            raise ValueError(f"Unknown info_type: {info_type}")
+
+
+
+
+
+
