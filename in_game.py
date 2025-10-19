@@ -4,6 +4,12 @@ from character_classes import *
 
 import pandas as pd
 
+## TO BE POPULATED ##
+first_night_order = []
+other_night_order = []
+
+
+
 assignments = pd.DataFrame([
     {'player': 'Madi',    'character': 'Cult Leader',     'role_type': 'Minion',   'win_probability': 0.42, 'team': 'Evil', 'drunk': '_'},
     {'player': 'Rita',    'character': 'Pukka',           'role_type': 'Demon',    'win_probability': 0.38, 'team': 'Evil', 'drunk': '_'},
