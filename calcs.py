@@ -590,7 +590,7 @@ def assignments(script_name, player_list,
 
 
         
-        from character_functions import find_not_in_play
+        from character_classes import find_not_in_play
         print(find_not_in_play(df, characters))
 
         # accept?
@@ -614,21 +614,21 @@ def assignments(script_name, player_list,
 # assignments(script, players)
 
 
-script = "Fargo"
-players = ["Madi","Rita","Pedro","Jed","Oli","Rowan2","Gana","Grace","Alona","Liza"]
-fixed_teams = {"Alona":"Good", "Oli": "Good"}
-fixed_characters = {"Rowan2":"Organ Grinder", "Pedro":"Banshee", "Grace":"Courtier","Oli":"Alsaahir","Madi":"Cult Leader"}
-fixed_role_types = {"Rita": "Demon"}
-included_characters = ["Pukka"]
-excluded_characters = ["Lord Of Typhon", "Kazali"]
+script = "Irrational_behaviour"
+players = ["Rowan2", "Grace", "Pedro", "Ed", "Rita", "Oli", "Liza", "Elia"]
+fixed_teams = {"Rowan2":"Good"}
+fixed_characters = {"Liza":"High Priestess"}
+# fixed_role_types = {"Rita": "Demon"}
+included_characters = ["Village Idiot"]
+# excluded_characters = ["Lord Of Typhon", "Kazali"]
 assignments(
     script, 
     players, 
     fixed_teams=fixed_teams, 
     fixed_characters=fixed_characters, 
-    fixed_role_types=fixed_role_types,
+    # fixed_role_types=fixed_role_types,
     included_characters=included_characters,
-    excluded_characters=excluded_characters,
+    # excluded_characters=excluded_characters,
     extra_randomness=0.3)
 
 

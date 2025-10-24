@@ -4,9 +4,20 @@ from character_classes import *
 
 import pandas as pd
 
-## TO BE POPULATED ##
-first_night_order = []
-other_night_order = []
+first_night_order = ["Lord Of Typhon", "Kazali", "Boffin", "Philosopher", "Alchemist", "Poppy Grower", "Yaggababble", "Magician", "Snitch", "Lunatic",
+                     "Summoner", "King", "Sailor", "Marionette", "Engineer", "Preacher", "Lil Monsta", "Lleech", "Xaan", "Posioner", "Widow", "Courtier",
+                     "Wizard", "Snake Charmer", "Godfather", "Organ Grinder", "Devil's Advocate", "Evil Twin", "Witch", "Cerenovus", "Fearmonger", "Harpy"
+                     "Mezepheles", "Pukka", "Pixie", "Huntsman", "Damsel", "Amnesiac", "Washerwoman", "Librarian", "Investigator", "Chef", "Empath", "Fortune Teller",
+                     "Butler", "Grandmother", "Clockmaker", "Dreamer", "Seamstress", "Steward", "Knight", "Noble", "Balloonist", "Shugenja", "Village Idiot",
+                     "Bounty Hunter", "Nightwatchman", "Cult Leader", "Spy", "Ogre", "High Priestess", "General", "Chambermaid", "Mathematician", "Leviathan", "Vizier"]
+other_night_order = ["Philosopher", "Poppy Grower", "Sailor", "Engineer", "Preacher", "Xaan", "Poisoner", "Courtier", "Innkeeper", "Wizard", "Gambler", "Acrobat",
+                     "Snake Charmer", "Monk", "Organ Grinder", "Devil's Advocate", "Witch", "Cerenovus", "Pit Hag", "Fearmonger", "Harpy", "Mezepheles,"
+                     "Scarlet Woman", "Summoner", "Lunatic", "Exorcist", "Lycanthrope", "Legion", "Imp", "Zombuul", "Pukka", "Shabaloth", "Po", "Fang Gu", "No Dashii",
+                     "Vortox", "Lord Of Typhon", "Vigormortis", "Ojo", "Al Hadikhia", "Lleech", "Lil Monta", "Yaggababble", "Kazali", "Assassin", "Godfather",
+                     "Gossip", "Hatter", "Barber", "Sweetheart", "Sage", "Banshee", "Professor", "Choirboy", "Huntsman", "Damsel", "Amnesiac", "Farmer",
+                     "Tinker", "Moonchild", "Grandmother", "Ravenkeeper", "Empath", "Fortune Teller", "Undertaker", "Dreamer", "Flowergirl", "Town Crier",
+                     "Oracle", "Seamstress", "Juggler", "Balloonist", "Village Idiot", "King", "Bounty Hunter", "Nightwatchman", "Cult Leader", "Butler",
+                     "Spy", "High Priestess", "General", "Chambermaid", "Mathematician", "Leviathan"]
 
 
 
