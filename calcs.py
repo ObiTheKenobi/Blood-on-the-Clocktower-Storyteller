@@ -615,20 +615,20 @@ def assignments(script_name, player_list,
 
 
 script = "Irrational_behaviour"
-players = ["Rowan2", "Grace", "Pedro", "Ed", "Rita", "Oli", "Liza", "Elia"]
-fixed_teams = {"Rowan2":"Good"}
-fixed_characters = {"Liza":"High Priestess"}
+players = ["Rowan2", "Pedro", "Ed", "Rita", "Oli", "Liza", "Elia", "Jed", "Gana"]
+fixed_teams = {"Pedro":"Good", "Oli":"Good"}
+fixed_characters = {"Ed":"Alsaahir"}
 # fixed_role_types = {"Rita": "Demon"}
-included_characters = ["Village Idiot"]
-# excluded_characters = ["Lord Of Typhon", "Kazali"]
+# included_characters = ["Village Idiot"]
+excluded_characters = ["Wizard", "Hermit", "Lord Of Typhon"]
 assignments(
     script, 
     players, 
     fixed_teams=fixed_teams, 
     fixed_characters=fixed_characters, 
     # fixed_role_types=fixed_role_types,
-    included_characters=included_characters,
-    # excluded_characters=excluded_characters,
+    # included_characters=included_characters,
+    excluded_characters=excluded_characters,
     extra_randomness=0.3)
 
 
